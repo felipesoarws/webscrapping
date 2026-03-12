@@ -1,0 +1,56 @@
+name: 📅 Scraping - Jogos Futuros
+
+on:
+  schedule:
+    # 07h UTC (04h Brasília) - antes dos jogos do dia
+    - cron: '0 7 * * *'
+    # 14h UTC (11h Brasília) - atualização no meio do dia
+    - cron: '0 14 * * *'
+  workflow_dispatch: # Rodar manualmente se necessário
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-future:
+    name: Jogos Futuros (Hoje + Amanhã + Depois)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120 # Máximo 2h (bem dentro do limite de 6h)
+
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar o Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Instalar dependencias
+        run: |
+          cd WebScraping_FlashScore
+          pip install -r requirements.txt
+          pip install webdriver-manager
+
+      - name: Executar Scraping Futuro
+        run: |
+          cd WebScraping_FlashScore
+          python scrape_jogos_futuros.py
+          python generate_df_jogos_futuros.py
+        env:
+          PYTHONUNBUFFERED: 1
+
+      - name: Commit e Push
+        if: always()
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add WebScraping_FlashScore/jogos_futuros/
+          git add WebScraping_FlashScore/dataframes_jogos_futuros/
+          git commit -m "📅 Jogos Futuros: $(date +'%Y-%m-%d %H:%M') UTC [skip ci]" || echo "Sem mudanças."
+          git push

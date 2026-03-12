@@ -1,0 +1,93 @@
+name: 📚 Scraping - Jogos Passados (Histórico)
+
+# Apenas manual - para carga inicial do histórico (2021 a 2024)
+# Cada temporada roda em paralelo em sua própria máquina (job separado)
+# O script para sozinho em ~5.5h e salva o progresso
+# Pode ser rodado múltiplas vezes - sempre continua de onde parou
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: 'Temporada a processar (ou "all" para todas)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - "2024"
+          - "2024-2025"
+          - "2023"
+          - "2023_2024"
+          - "2022"
+          - "2022-2023"
+          - "2021"
+          - "2021-2022"
+
+permissions:
+  contents: write
+
+jobs:
+  # Job de controle: define quais temporadas serão processadas
+  prepare:
+    name: Preparar lista de temporadas
+    runs-on: ubuntu-latest
+    outputs:
+      seasons: ${{ steps.set-seasons.outputs.seasons }}
+    steps:
+      - name: Definir temporadas
+        id: set-seasons
+        run: |
+          if [ "${{ github.event.inputs.season }}" = "all" ]; then
+            echo 'seasons=["2024","2024-2025","2023","2023_2024","2022","2022-2023","2021","2021-2022"]' >> $GITHUB_OUTPUT
+          else
+            echo 'seasons=["${{ github.event.inputs.season }}"]' >> $GITHUB_OUTPUT
+          fi
+
+  scrape-historical:
+    name: Histórico - ${{ matrix.season }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    timeout-minutes: 330 # 5h30 - o script já para sozinho em 5.5h
+    strategy:
+      fail-fast: false # Uma temporada falhar não cancela as outras
+      matrix:
+        season: ${{ fromJson(needs.prepare.outputs.seasons) }}
+
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar o Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Instalar dependencias
+        run: |
+          cd WebScraping_FlashScore
+          pip install -r requirements.txt
+          pip install webdriver-manager
+
+      - name: Executar Scraping Histórico
+        run: |
+          cd WebScraping_FlashScore
+          python scrape_jogos_passados.py --season ${{ matrix.season }}
+          python generate_df_jogos_passados.py
+        env:
+          PYTHONUNBUFFERED: 1
+
+      - name: Commit e Push
+        if: always()
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add WebScraping_FlashScore/jogos_passados/
+          git add WebScraping_FlashScore/dataframes_jogos_passados/
+          git commit -m "📚 Histórico [${{ matrix.season }}]: $(date +'%Y-%m-%d') [skip ci]" || echo "Sem mudanças."
+          git push || (git pull --rebase && git push)

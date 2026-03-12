@@ -10,6 +10,8 @@ import json
 import os
 import time
 import subprocess
+import argparse
+import sys
 from datetime import datetime
 from flashscore_scraper import FlashScoreScraper
 
@@ -777,9 +779,22 @@ def process_season(scraper, league_urls, season_name, output_dir):
             
             print(f"  🔄 {len(new_match_ids)} novos jogos para processar (de {len(match_ids)} totais)")
             
+            # Hora de início do job (para o timeout de 6h do GitHub)
+            # Se estivermos no GitHub Actions, vamos parar um pouco antes das 6 horas
+            job_start_time = time.time()
+            max_duration = 5.5 * 3600  # 5 horas e 30 minutos (segurança)
+            
             # Processa apenas jogos novos
             for i, match_id in enumerate(new_match_ids, 1):
                 try:
+                    # Verifica se o tempo está acabando (graceful exit)
+                    elapsed = time.time() - job_start_time
+                    if elapsed > max_duration:
+                        print(f"\n\n🛑 TEMPO LIMITE PRÓXIMO ({elapsed/3600:.1f}h). Parando para salvar progresso...")
+                        save_country_data(filename, country_data)
+                        git_commit(f"Timeout: {league_name} ({country.upper()}, {season_name}) - Salvando progresso parcial", filename)
+                        return True # Indica que parou por timeout
+                    
                     # Verifica e recria driver se necessário
                     recreate_driver_if_needed(scraper)
                     
@@ -825,8 +840,8 @@ def process_season(scraper, league_urls, season_name, output_dir):
             total_scraped = len(existing_league['matches'])
             print(f"  ✅ {total_scraped}/{len(match_ids)} jogos extraídos nesta liga")
             
-            # Commit automático após cada liga
-            # git_commit(f"Scraping: {league_name} ({country.upper()}, {season_name}) - {total_scraped} jogos", filename)
+            # Commit automático após cada liga para não perder progresso
+            git_commit(f"Scraping: {league_name} ({country.upper()}, {season_name}) - {total_scraped} jogos", filename)
         
         # Salva final do país
         save_country_data(filename, country_data)
@@ -869,80 +884,48 @@ def scrape_complete_all_seasons():
     # Modo headless (sem interface gráfica) - funciona com os seletores corretos e aceitação de cookies
     scraper = FlashScoreScraper(headless=True)
     
+    # Dicionário de temporadas disponíveis
+    seasons = {
+        "2026": (LINKS_2026, "2026"),
+        "2025": (LINKS_2025, "2025"),
+        "2025-2026": (LINKS_2025_2026, "2025-2026"),
+        "2024": (LINKS_2024, "2024"),
+        "2024-2025": (LINKS_2024_2025, "2024-2025"),
+        "2023": (LINKS_2023, "2023"),
+        "2023_2024": (LINKS_2023_2024, "2023-2024"),
+        "2022": (LINKS_2022, "2022"),
+        "2022-2023": (LINKS_2022_2023, "2022-2023"),
+        "2021": (LINKS_2021, "2021"),
+        "2021-2022": (LINKS_2021_2022, "2021-2022")
+    }
+
+    # Configuração de argumentos para permitir rodar apenas uma temporada via CLI (útil para Matrix do GitHub)
+    parser = argparse.ArgumentParser(description='FlashScore Scraper de Jogos Passados')
+    parser.add_argument('--season', type=str, choices=list(seasons.keys()) + ['all'], default='all',
+                        help='Temporada específica para processar (ou "all")')
+    args = parser.parse_args()
+
     try:
         start_time = datetime.now()
         
-        # ========================================
-        # 🎯 ESCOLHA QUAIS TEMPORADAS PROCESSAR:
-        # ========================================
-        # Comente (#) as linhas das temporadas que NÃO quer processar
-        # Ordem: 2025 → 2025-2026 → 2024 → 2024-2025 → 2023 → 2023-2024 → 2022 → 2022-2023 → 2021 → 2021-2022
-        
-        # FASE 1: Temporada 2026 (24 ligas - Sul América, Ásia, etc)
-        print("\n\n" + "🟡" * 50)
-        print("FASE 1 de 11: TEMPORADA 2026")
-        print("🟡" * 50)
-        process_season(scraper, LINKS_2026, "2026", output_dir)
+        # Define quais temporadas serão processadas
+        to_process = []
+        if args.season == 'all':
+            # Ordem cronológica inversa para dar prioridade ao que é mais recente
+            order = ["2026", "2025", "2025-2026", "2024", "2024-2025", "2023", "2023_2024", "2022", "2022-2023", "2021", "2021-2022"]
+            to_process = [seasons[s] for s in order if s in seasons]
+        else:
+            to_process = [seasons[args.season]]
 
-        # FASE 2: Temporada 2025 (24 ligas - Sul América, Ásia, etc)
-        print("\n\n" + "🟡" * 50)
-        print("FASE 2 de 11: TEMPORADA 2025")
-        print("🟡" * 50)
-        process_season(scraper, LINKS_2025, "2025", output_dir)
-        
-        # FASE 3: Temporada 2025-2026 (54 ligas - Europa, etc)
-        print("\n\n" + "🟠" * 50)
-        print("FASE 3 de 11: TEMPORADA 2025-2026")
-        print("🟠" * 50)
-        process_season(scraper, LINKS_2025_2026, "2025-2026", output_dir)
-        
-        # FASE 4: Temporada 2024 (24 ligas - Sul América, Ásia, etc)
-        print("\n\n" + "🔵" * 50)
-        print("FASE 4 de 11: TEMPORADA 2024")
-        print("🔵" * 50)
-        process_season(scraper, LINKS_2024, "2024", output_dir)
-        
-        # FASE 5: Temporada 2024-2025 (54 ligas - Europa, etc)
-        print("\n\n" + "🟢" * 50)
-        print("FASE 5 de 11: TEMPORADA 2024-2025")
-        print("🟢" * 50)
-        process_season(scraper, LINKS_2024_2025, "2024-2025", output_dir)
-        
-        # FASE 6: Temporada 2023 (24 ligas - Sul América, Ásia, etc)
-        print("\n\n" + "🟣" * 50)
-        print("FASE 6 de 11: TEMPORADA 2023")
-        print("🟣" * 50)
-        process_season(scraper, LINKS_2023, "2023", output_dir)
-        
-        # FASE 7: Temporada 2023-2024 (54 ligas - Europa, etc)
-        print("\n\n" + "🔴" * 50)
-        print("FASE 7 de 11: TEMPORADA 2023-2024")
-        print("🔴" * 50)
-        process_season(scraper, LINKS_2023_2024, "2023-2024", output_dir)
-        
-        # FASE 8: Temporada 2022 (24 ligas - Sul América, Ásia, etc)
-        print("\n\n" + "⚪" * 50)
-        print("FASE 8 de 11: TEMPORADA 2022")
-        print("⚪" * 50)
-        process_season(scraper, LINKS_2022, "2022", output_dir)
-        
-        # FASE 9: Temporada 2022-2023 (54 ligas - Europa, etc)
-        print("\n\n" + "⚫" * 50)
-        print("FASE 9 de 11: TEMPORADA 2022-2023")
-        print("⚫" * 50)
-        process_season(scraper, LINKS_2022_2023, "2022-2023", output_dir)
-        
-        # FASE 10: Temporada 2021 (24 ligas - Sul América, Ásia, etc)
-        print("\n\n" + "🟤" * 50)
-        print("FASE 10 de 11: TEMPORADA 2021")
-        print("🟤" * 50)
-        process_season(scraper, LINKS_2021, "2021", output_dir)
-        
-        # FASE 11: Temporada 2021-2022 (54 ligas - Europa, etc)
-        print("\n\n" + "🟥" * 50)
-        print("FASE 11 de 11: TEMPORADA 2021-2022")
-        print("🟥" * 50)
-        process_season(scraper, LINKS_2021_2022, "2021-2022", output_dir)
+        for i, (links, name) in enumerate(to_process, 1):
+            print("\n\n" + "🟡" * 50)
+            print(f"FASE {i} de {len(to_process)}: TEMPORADA {name}")
+            print("🟡" * 50)
+            timeout_reached = process_season(scraper, links, name, output_dir)
+            
+            if timeout_reached:
+                print(f"\n⚠️ Encerrando execução antecipadamente por limite de tempo do job.")
+                break
         
         # Resumo final
         end_time = datetime.now()

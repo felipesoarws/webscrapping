@@ -22,11 +22,11 @@ from flashscore_scraper import FlashScoreScraper
 # ==================== EXTRAI PAÍSES DOS LINKS ====================
 def extract_countries_from_links():
     """Extrai países únicos dos links de ligas"""
-    from scrape_jogos_passados import LINKS_2024, LINKS_2024_2025
+    from scrape_jogos_passados import LINKS_2026, LINKS_2025_2026
     
     countries = set()
     
-    for url in LINKS_2024 + LINKS_2024_2025:
+    for url in LINKS_2026 + LINKS_2025_2026:
         # URL formato: .../football/PAÍS/liga-nome/...
         parts = url.split('/football/')
         if len(parts) > 1:
